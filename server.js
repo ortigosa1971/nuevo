@@ -1,8 +1,11 @@
+
 const express = require('express');
 const session = require('express-session');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const bodyParser = require('body-parser');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
 
@@ -27,102 +30,82 @@ app.use(session({
   cookie: { maxAge: 3600000 }
 }));
 
-// Middleware para parsear formularios
+// Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Página principal protegida
+// Rutas protegidas
 app.get('/', (req, res) => {
   if (!req.session.user) return res.redirect('/login.html');
   res.sendFile(path.join(__dirname, 'views', 'inicio.html'));
 });
 
-// Página de inicio protegida
 app.get('/inicio.html', (req, res) => {
   if (!req.session.user) return res.redirect('/login.html');
   res.sendFile(path.join(__dirname, 'views', 'inicio.html'));
 });
 
-// Verificación de sesión activa
+// Verificación de sesión
 app.get('/verificar-sesion', (req, res) => {
-  if (!req.session.user) {
-    console.log("🔒 [verificar-sesion] No hay sesión activa");
-    return res.sendStatus(401);
-  }
+  if (!req.session.user) return res.sendStatus(401);
 
   db.get('SELECT session_id FROM users WHERE username = ?', [req.session.user.username], (err, row) => {
-    if (err) {
-      console.error("⚠️ [verificar-sesion] Error al verificar sesión:", err.message);
-      return req.session.destroy(() => res.sendStatus(500));
-    }
-
-    if (!row || row.session_id !== req.sessionID) {
-      console.log("⛔ Sesión no coincide o usuario no encontrado. Cerrando sesión.");
-      req.session.destroy(() => res.sendStatus(401));
-    } else {
-      res.sendStatus(200);
-    }
+    if (err) return req.session.destroy(() => res.sendStatus(500));
+    if (!row || row.session_id !== req.sessionID)
+      return req.session.destroy(() => res.sendStatus(401));
+    res.sendStatus(200);
   });
 });
 
-// Manejo de login
+// Login
 app.post('/login', (req, res) => {
   const { usuario } = req.body;
 
-  if (!usuario || usuario.trim() === "") {
-    console.log("⚠️ [login] Usuario vacío");
-    return res.redirect('/login.html?error=1');
-  }
+  if (!usuario || usuario.trim() === "") return res.redirect('/login.html?error=1');
 
   db.get('SELECT * FROM users WHERE username = ?', [usuario], (err, row) => {
-    if (err) {
-      console.error("⚠️ [login] Error al buscar usuario:", err.message);
-      return res.redirect('/login.html?error=1');
-    }
+    if (err || !row) return res.redirect('/login.html?error=1');
 
-    if (!row) {
-      console.log("❌ [login] Usuario no encontrado:", usuario);
-      return res.redirect('/login.html?error=1');
-    }
-
-    console.log("🔓 [login] Usuario autenticado:", usuario);
-
-    // Cerrar cualquier sesión anterior
     db.run('UPDATE users SET session_id = NULL WHERE username = ?', [usuario], (err) => {
-      if (err) {
-        console.error("❌ Error limpiando session_id previo:", err.message);
-        return res.redirect('/login.html?error=1');
-      }
+      if (err) return res.redirect('/login.html?error=1');
 
-      // Crear nueva sesión
       req.session.user = { username: row.username };
-
-      // Guardar nuevo session_id en la base de datos
       db.run('UPDATE users SET session_id = ? WHERE username = ?', [req.sessionID, row.username], (err) => {
-        if (err) {
-          console.error("❌ Error actualizando session_id nuevo:", err.message);
-          return res.redirect('/login.html?error=1');
-        }
-
-        console.log(`✅ [login] session_id actualizado: ${req.sessionID}`);
+        if (err) return res.redirect('/login.html?error=1');
         res.redirect('/inicio.html');
       });
     });
   });
 });
 
-// Nuevo endpoint para datos meteorológicos
-app.get('/clima', (req, res) => {
+// Datos meteorológicos reales desde Weather Underground
+app.get('/clima', async (req, res) => {
+  try {
+    const API_KEY = "e19cf0d935fc49329cf0d935fc5932cc";
+    const STATION_ID = "IALFAR30";
+    const url = `https://api.weather.com/v2/pws/observations/current?stationId=${STATION_ID}&format=json&units=m&apiKey=${API_KEY}`;
+    const response = await axios.get(url);
+    const obs = response.data.observations?.[0];
+
+    if (!obs) return res.status(404).json({ error: "No hay datos disponibles." });
+
+    const metric = obs.metric || {};
     const weatherData = {
-        temperatura: 25,
-        humedad: 60,
-        viento: 12,
-        presion: 1015,
-        lluvia: 0
+      temperatura: metric.temp,
+      humedad: obs.humidity,
+      viento: metric.windSpeed,
+      presion: metric.pressure,
+      lluvia: metric.precipTotal
     };
+
     res.json(weatherData);
+  } catch (error) {
+    console.error("❌ Error al consultar la API:", error.message);
+    res.status(500).json({ error: "Error al obtener datos." });
+  }
 });
 
-// Iniciar el servidor
+// Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor escuchando en puerto ${PORT}`));
+
