@@ -5,6 +5,15 @@ const path = require('path');
 const bodyParser = require('body-parser');
 
 const app = express();
+
+// CSP para permitir Google Translate y estilos externos
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy",
+    "default-src 'self'; style-src 'self' 'unsafe-inline' https://www.gstatic.com; script-src 'self' 'unsafe-inline' https://translate.google.com https://www.gstatic.com; frame-src 'self' https://translate.google.com"
+  );
+  next();
+});
+
 const db = new sqlite3.Database('./db/usuarios.db', (err) => {
   if (err) console.error("❌ Error al conectar con la base de datos:", err.message);
   else console.log("✅ Conectado a la base de datos usuarios.db");
@@ -102,12 +111,6 @@ app.post('/login', (req, res) => {
   });
 });
 
-// Iniciar el servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor escuchando en puerto ${PORT}`));
-
-
-
 // Nuevo endpoint para datos meteorológicos
 app.get('/clima', (req, res) => {
     const weatherData = {
@@ -119,3 +122,7 @@ app.get('/clima', (req, res) => {
     };
     res.json(weatherData);
 });
+
+// Iniciar el servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Servidor escuchando en puerto ${PORT}`));
